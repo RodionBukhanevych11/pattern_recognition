@@ -113,6 +113,9 @@ if __name__ == '__main__':
     image = cv2.imread(image_path)
     start = time.time()
     seg_image, results = gibbs_sampler(image)
+    stacked_img = np.stack((seg_image,)*3, axis=-1)
+    stacked_img[:,:,0]*=255
+    cv2.imwrite("result.jpg",stacked_img)
     end = time.time()
     print("TIME = ",end-start)
     for i,mask in enumerate(results):
