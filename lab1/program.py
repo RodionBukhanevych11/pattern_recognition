@@ -94,7 +94,7 @@ def get_init_prob(
                 label_matrix[i,j] = 1
     return label_matrix
 
-def gibbs_sampler(image : np.ndarray,iterations: int) -> Tuple[np.ndarray,List[np.ndarray]]:
+def gibbs_sampler(image : np.ndarray,iterations: int = 100) -> Tuple[np.ndarray,List[np.ndarray]]:
     mean,cov_inv,cov_det = get_image_params(image,BBOX1,BBOX2)
     image = cv2.resize(image,(256,256))
     denominator = [np.sqrt(((2 * np.pi)**3) * cov_det[0]),np.sqrt(((2 * np.pi)**3) * cov_det[1])]
@@ -112,7 +112,7 @@ if __name__ == '__main__':
     image_path = 'image.jpg'
     image = cv2.imread(image_path)
     start = time.time()
-    seg_image, results = gibbs_sampler(image, 10)
+    seg_image, results = gibbs_sampler(image)
     end = time.time()
     print("TIME = ",end-start)
     for i,mask in enumerate(results):
