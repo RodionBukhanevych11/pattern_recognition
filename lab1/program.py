@@ -5,7 +5,7 @@ from typing import Tuple,Any,List
 matplotlib.use('Agg')
 import time
 
-EPS = 0.9
+EPS = 0.3
 BBOX1 = np.array([150,100,200,400])
 BBOX2 = np.array([270,100,320,400])
 
@@ -43,9 +43,13 @@ def compute_obervation(
     for i in range(image.shape[0]-1):
         for j in range(image.shape[1]-1):
             neighbors = get_neighbors(label_matrix,i,j)
-            pixels = image[i, j] + EPS * np.linalg.norm(neighbors[:4])
-            p1 = gauss_prob(pixels, mean[0], denominator[0], cov_inv[0])
-            p2 = gauss_prob(pixels, mean[1], denominator[1], cov_inv[1])
+            factor = 1
+            for neighbor in neighbors:
+                if factor == label_matrix[i,j]:
+                    factor*=EPS
+                else: factor*=(1-EPS)
+            p1 = gauss_prob(image[i,j], mean[0], denominator[0], cov_inv[0]) * factor
+            p2 = gauss_prob(image[i,j], mean[1], denominator[1], cov_inv[1]) * factor
             if p1>=p2:
                 new_label_matrix[i,j] = 0
             else:
@@ -53,29 +57,19 @@ def compute_obervation(
     return new_label_matrix
 
 def get_image_params(
-    image : np.ndarray,
-    bbox1:np.ndarray,
-    bbox2:np.ndarray
+    area1 : np.ndarray,
+    area2 : np.ndarray,
     ) -> Tuple[Tuple[np.ndarray],Tuple[np.ndarray],Tuple[np.ndarray]]:
-    area1 = image[bbox1[0]:bbox1[2],bbox1[1]:bbox1[3]]
-    area2 = image[bbox2[0]:bbox2[2],bbox2[1]:bbox2[3]]
-    m1 = np.mean(area1, axis = (0,1))
-    m2 = np.mean(area2, axis = (0,1))
-    s1 = get_cov_matrix(area1)
-    s2 = get_cov_matrix(area2)
+    m1 = np.mean(area1, axis = 0)
+    m2 = np.mean(area2, axis = 0)
+    s1 = np.cov(area1,rowvar = False)
+    s2 = np.cov(area2,rowvar = False)
     cov_inverse1 = np.linalg.inv(s1)
     cov_inverse2 = np.linalg.inv(s2) 
     cov_det1 = np.linalg.det(s1)
     cov_det2 = np.linalg.det(s2)
     return (m1,m2),(cov_inverse1,cov_inverse2),(cov_det1,cov_det2)
 
-def get_cov_matrix(image : np.ndarray) -> np.ndarray:
-    image = image.reshape(-1, 3)
-    meanX = np.mean(image, axis = 0)
-    lenX = image.shape[0]
-    X = image - meanX
-    cov_matrix = X.T.dot(X)/lenX
-    return cov_matrix
 
 def get_init_prob(
     image : np.ndarray, 
@@ -95,7 +89,11 @@ def get_init_prob(
     return label_matrix
 
 def gibbs_sampler(image : np.ndarray,iterations: int = 100) -> Tuple[np.ndarray,List[np.ndarray]]:
-    mean,cov_inv,cov_det = get_image_params(image,BBOX1,BBOX2)
+    area1 = image[BBOX1[0]:BBOX1[2],BBOX1[1]:BBOX1[3]]
+    area1 = area1.reshape(area1.shape[0]*area1.shape[1],3)
+    area2 = image[BBOX2[0]:BBOX2[2],BBOX2[1]:BBOX2[3]]
+    area2 = area2.reshape(area2.shape[0]*area2.shape[1],3)
+    mean,cov_inv,cov_det = get_image_params(area1,area2)
     image = cv2.resize(image,(256,256))
     denominator = [np.sqrt(((2 * np.pi)**3) * cov_det[0]),np.sqrt(((2 * np.pi)**3) * cov_det[1])]
     label_matrix = get_init_prob(image, mean, denominator, cov_inv)
@@ -103,25 +101,24 @@ def gibbs_sampler(image : np.ndarray,iterations: int = 100) -> Tuple[np.ndarray,
     for iteration in range(iterations):
         print(iteration)
         label_matrix = compute_obervation(label_matrix, image, mean, denominator, cov_inv)
+        area1 = image[label_matrix==0]
+        area2 = image[label_matrix==1]
+        mean,cov_inv,cov_det = get_image_params(area1,area2)
+        denominator = [np.sqrt(((2 * np.pi)**3) * cov_det[0]),np.sqrt(((2 * np.pi)**3) * cov_det[1])]
         results.append(label_matrix)
-    
     return label_matrix,results
 
 
 if __name__ == '__main__':
-    image_path = 'image.jpg'
+    image_path = 'lab1/image.jpg'
     image = cv2.imread(image_path)
     start = time.time()
     seg_image, results = gibbs_sampler(image)
     stacked_img = np.stack((seg_image,)*3, axis=-1)
     stacked_img[:,:,0]*=255
-    cv2.imwrite("result.jpg",stacked_img)
+    cv2.imwrite("lab1/result.jpg",stacked_img)
     end = time.time()
     print("TIME = ",end-start)
     for i,mask in enumerate(results):
         stacked_img = np.stack((mask,)*3, axis=-1)*255
-        cv2.imshow('Window', stacked_img)
-        key = cv2.waitKey(1000)
-        if key == 27:
-            cv2.destroyAllWindows()
-            break
+        cv2.imwrite(f'lab1/results/image_{i}.jpg',stacked_img)
