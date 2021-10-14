@@ -45,7 +45,7 @@ def compute_obervation(
             neighbors = get_neighbors(label_matrix,i,j)
             factor = 1
             for neighbor in neighbors:
-                if factor == label_matrix[i,j]:
+                if neighbor == label_matrix[i,j]:
                     factor*=EPS
                 else: factor*=(1-EPS)
             p1 = gauss_prob(image[i,j], mean[0], denominator[0], cov_inv[0]) * factor
