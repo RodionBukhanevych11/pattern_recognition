@@ -50,6 +50,8 @@ def compute_obervation(
                 else: factor*=(1-EPS)
             p1 = gauss_prob(image[i,j], mean[0], denominator[0], cov_inv[0]) * factor
             p2 = gauss_prob(image[i,j], mean[1], denominator[1], cov_inv[1]) * factor
+            p1 = p1/(p1+p2)
+            p2 = p2/(p1+p2)
             if p1>=p2:
                 new_label_matrix[i,j] = 0
             else:
