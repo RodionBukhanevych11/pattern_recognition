@@ -4,6 +4,8 @@ import matplotlib
 from typing import Tuple,Any,List
 import time
 from tqdm import tqdm
+import warnings
+warnings.filterwarnings("ignore")
 
 
 BBOX1 = np.array([150,100,200,400])
@@ -17,7 +19,7 @@ def gauss_prob(
     ) -> float:
     x_m = x - mean
     numerator = np.exp(-(np.dot(np.dot(x_m.T,cov_inv),x_m)) / 2)
-    return (numerator/denominator)/100
+    return (numerator/denominator)
 
 
 def get_neighbors(matrix : np.ndarray, i : int, j : int):
@@ -32,85 +34,89 @@ def get_neighbors(matrix : np.ndarray, i : int, j : int):
         neighbors.append(matrix[i+1, j])
     return neighbors
 
+
+def remove_bones(neighbors_weights,eps):
+    filtered_edges = np.zeros((len(neighbors_weights),4))
+    for i,neighbor_edges in enumerate(neighbors_weights):
+        maximum_edge = max(neighbor_edges)
+        for j,edge in enumerate(neighbor_edges):
+            if edge-maximum_edge<=eps:
+                filtered_edges[i,j] = edge
+            else:
+                filtered_edges[i,j] = None
+        for n, neighbor_edges in enumerate(neighbors_weights[:,:2]):
+            selected = list(set(range(len(neighbors_weights[:,:2]))) - set([n]))
+            nonNaN_bones_amount = len(np.argwhere(np.isnan(selected) == False))
+            if nonNaN_bones_amount==0:
+                filtered_edges[n,0] = None
+                filtered_edges[n,1] = None
+        for n, neighbor_edges in enumerate(neighbors_weights[:,2:]):
+            selected = list(set(range(len(neighbors_weights[:,2:]))) - set([n]))
+            nonNaN_bones_amount = len(np.argwhere(np.isnan(selected) == False))
+            if nonNaN_bones_amount==0:
+                filtered_edges[n,2] = None
+                filtered_edges[n,3] = None
+    return filtered_edges
+
+
+
 def compute_obervation(
     image : np.ndarray,
     mean : Tuple[np.ndarray], 
     denominator : Tuple[float],
     cov_inv :  Tuple[np.ndarray],
-    eps : float
-    ) -> np.ndarray:
+    eps_matrix : np.ndarray) -> np.ndarray:
     new_label_matrix = np.zeros((image.shape[0],image.shape[1]))
     for i in tqdm(range(image.shape[0]-1)):
         for j in range(image.shape[1]-1):
             neighbors = get_neighbors(image,i,j)
             neighbors_weights = []
-            for neighbor in neighbors:
-                p0_0 = np.log(gauss_prob(image[i,j], mean[0], denominator[0], cov_inv[0])) + np.log(1-eps)
-                p0_1 = np.log(gauss_prob(image[i,j], mean[0], denominator[0], cov_inv[0])) + np.log(eps)
-                p1_0 = np.log(gauss_prob(image[i,j], mean[1], denominator[1], cov_inv[1])) + np.log(eps)
-                p1_1 = np.log(gauss_prob(image[i,j], mean[1], denominator[1], cov_inv[1])) + np.log(1-eps)
-                neighbors_weights.append([p0_0,p0_1,p1_0,p1_1])
+            for _ in neighbors:
+                p0_0 = np.log(gauss_prob(image[i,j], mean[0], denominator[0], cov_inv[0])) + np.log(0.7)
+                p0_0 = p0_0 if p0_0!=-np.inf else -1000
+                p0_1 = np.log(gauss_prob(image[i,j], mean[0], denominator[0], cov_inv[0])) + np.log(0.3)
+                p0_1 = p0_1 if p0_1!=-np.inf else -1000
+                p1_0 = np.log(gauss_prob(image[i,j], mean[1], denominator[1], cov_inv[1])) + np.log(0.3)
+                p1_0 = p1_0 if p1_0!=-np.inf else -1000
+                p1_1 = np.log(gauss_prob(image[i,j], mean[1], denominator[1], cov_inv[1])) + np.log(0.7)
+                p1_1 = p1_1 if p1_1!=-np.inf else -1000
+                added = [p0_0,p0_1,p1_0,p1_1]
+                min_added = abs(min(added))
+                weight_in_neighbor = []
+                for el in added:
+                    weight_in_neighbor.append(round(el+min_added,3))
+                del added
+                neighbors_weights.append(weight_in_neighbor)
             neighbors_weights = np.array(neighbors_weights)
-            for i in range(15):
+            for _ in range(100):
                 overweights = []
-                max_edges_0 = neighbors_weights[:,:2].max(axis = 1)
-                max_edges_1 = neighbors_weights[:,2:].max(axis = 1)
-                for i,neighbor_edges in enumerate(neighbors_weights):
+                for _,neighbor_edges in enumerate(neighbors_weights):
+                    max_edges_0 = neighbor_edges[:2].max()
+                    max_edges_1 = neighbor_edges[2:].max()
+                    sum_max_edges_0 = sum(neighbors_weights[:,:2].max(axis = 1))
+                    sum_max_edges_1 = sum(neighbors_weights[:,2:].max(axis = 1))
                     overweighted_neighbor = []
-                    for j,edge in enumerate(neighbor_edges):
-                        if j == 0 or j==1:
-                            new_edge = abs(edge - max_edges_0[i] + (max_edges_0.sum()/neighbors_weights.shape[0]))
-                        elif j == 2 or j==3:
-                            new_edge = abs(edge - max_edges_1[i] + (max_edges_1.sum()/neighbors_weights.shape[0]))
+                    for l,edge in enumerate(neighbor_edges):
+                        if l == 0 or l==1:
+                            new_edge = edge - max_edges_0 + (sum_max_edges_0/neighbors_weights.shape[0])
+                        elif l == 2 or l==3:
+                            new_edge = edge - max_edges_1 + (sum_max_edges_1/neighbors_weights.shape[0])
                         overweighted_neighbor.append(new_edge)
                     overweights.append(overweighted_neighbor)
                 neighbors_weights = np.array(overweights)
-            filtered_edges = []
-            maximum_edge = neighbors_weights.max()
-            filtered_edges = np.zeros((len(neighbors),4))
-            for i,neighbor_edges in enumerate(neighbors_weights):
-                    for j,edge in enumerate(neighbor_edges):
-                        if abs(edge-maximum_edge)<=eps:
-                            if j == 0:
-                                filtered_edges[i,0] = edge
-                            elif  j == 1:
-                                filtered_edges[i,1] = edge
-                            elif  j == 2:
-                                filtered_edges[i,2] = edge
-                            elif  j == 3:
-                                filtered_edges[i,3] = edge
-            edge_exist_0 = True
-            edge_exist_1 = True
-            for i,neighbor_edges in enumerate(filtered_edges):
-                for j,edge in enumerate(neighbor_edges):
-                    if j==0 or j==1:
-                        if edge==0:
-                            edge_exist_0 = False
-                    elif j==2 or j==3:
-                        if edge==0:
-                            edge_exist_1 = False
-            if edge_exist_0 and not edge_exist_1:
-                new_label_matrix[i,j] = 0
-                eps/=2
-            elif not edge_exist_0 and edge_exist_1:
-                new_label_matrix[i,j] = 1
-                eps/=2
-            elif edge_exist_0 or edge_exist_1:
-                filtered_edges_0_max = filtered_edges[:,:2].max()
-                filtered_edges_1_max = filtered_edges[:,2:].max()
-                if filtered_edges_0_max>filtered_edges_1_max:
-                    new_label_matrix[i,j] = 0
-                    eps/=2
-                elif filtered_edges_0_max<filtered_edges_1_max:
-                    new_label_matrix[i,j] = 1
-                    eps/=2
-                elif filtered_edges_0_max==filtered_edges_1_max:
-                    new_label_matrix[i,j] = 1
-                    eps/=2
-            elif not edge_exist_0 or not edge_exist_1:
-                new_label_matrix[i,j] = 1
+            filtered_edges = remove_bones(neighbors_weights,eps_matrix[i][j])
+            while np.isnan(filtered_edges.max()):
+                eps_matrix[i][j] = eps_matrix[i][j]*1.25
+                filtered_edges = remove_bones(neighbors_weights,eps_matrix[i][j])
+            else:
+                eps_matrix[i][j] = eps_matrix[i][j]/2
+                max_bone = np.argwhere(filtered_edges == filtered_edges.max())[0]
+                if max_bone[1] == 0 or max_bone[1] == 1:
+                    new_label_matrix[i][j] = 0
+                elif max_bone[1] == 2 or max_bone[1] == 3:
+                    new_label_matrix[i][j] = 1
         
-    return new_label_matrix, eps
+    return new_label_matrix, eps_matrix
 
 def get_image_params(
     area1 : np.ndarray,
@@ -153,14 +159,13 @@ def diffusion_sampler(image : np.ndarray,iterations: int = 5) -> Tuple[np.ndarra
     image = cv2.resize(image,(256,256))
     denominator = [np.sqrt(((2 * np.pi)**3) * cov_det[0]),np.sqrt(((2 * np.pi)**3) * cov_det[1])]
     results = []
-    eps = 0.7
+    eps_matrix = np.ones(image.shape[:2])*100
     for iteration in range(iterations):
-        label_matrix,eps = compute_obervation(image, mean, denominator, cov_inv, eps)
-        print('eps = ',eps)
+        label_matrix,eps_matrix = compute_obervation(image, mean, denominator, cov_inv,eps_matrix)
         print(iteration)
         stacked_img = np.stack((label_matrix,)*3, axis=-1)
         stacked_img[:,:,0]*=255
-        cv2.imwrite(f"lab2/results/result_{iteration}.jpg",stacked_img)
+        cv2.imwrite(f"results/result_{iteration}.jpg",stacked_img)
         area1 = image[label_matrix==0]
         area2 = image[label_matrix==1]
         mean,cov_inv,cov_det = get_image_params(area1,area2)
@@ -170,15 +175,15 @@ def diffusion_sampler(image : np.ndarray,iterations: int = 5) -> Tuple[np.ndarra
 
 
 if __name__ == '__main__':
-    image_path = 'lab2/image.jpg'
+    image_path = 'image.jpg'
     image = cv2.imread(image_path)/255.0
     start = time.time()
     seg_image, results = diffusion_sampler(image)
     stacked_img = np.stack((seg_image,)*3, axis=-1)
     stacked_img[:,:,0]*=255
-    cv2.imwrite("lab2/result.jpg",stacked_img)
+    cv2.imwrite("result.jpg",stacked_img)
     end = time.time()
     print("TIME = ",end-start)
     for i,mask in enumerate(results):
         stacked_img = np.stack((mask,)*3, axis=-1)*255
-        cv2.imwrite(f'lab2/results/image_{i}.jpg',stacked_img)
+        cv2.imwrite(f'results/image_{i}.jpg',stacked_img)
